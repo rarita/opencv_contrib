@@ -731,6 +731,10 @@ type.
 CV_EXPORTS_W void blendLinear(InputArray img1, InputArray img2, InputArray weights1, InputArray weights2,
                             OutputArray result, Stream& stream = Stream::Null());
 
+
+CV_EXPORTS_W void adaptiveThreshold(InputArray _src, OutputArray _dst, double maxValue,
+                                    int method, int type, int blockSize, double delta, Stream& stream = Stream::Null());
+
 //! @}
 
 }} // namespace cv { namespace cuda {

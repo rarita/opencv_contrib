@@ -40,14 +40,22 @@ the use of this software, even if advised of the possibility of such damage.
 #include "opencv2/aruco.hpp"
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/cudev/common.hpp>
 
 #include "apriltag_quad_thresh.hpp"
 #include "zarray.hpp"
+
+// for debug
+// TODO: add ifdef DEBUG
+#include <opencv2/core/utils/logger.hpp>
 
 //#define APRIL_DEBUG
 #ifdef APRIL_DEBUG
 #include "opencv2/imgcodecs.hpp"
 #endif
+
+#define COMPILE_WITH_CUDA
+#include "../../cudaimgproc/include/opencv2/cudaimgproc.hpp"
 
 namespace cv {
 namespace aruco {
@@ -79,6 +87,7 @@ DetectorParameters::DetectorParameters()
       maxErroneousBitsInBorderRate(0.35),
       minOtsuStdDev(5.0),
       errorCorrectionRate(0.6),
+      useCuda(true),
       aprilTagQuadDecimate(0.0),
       aprilTagQuadSigma(0.0),
       aprilTagMinClusterPixels(5),
@@ -106,21 +115,46 @@ static void _convertToGrey(InputArray _in, OutputArray _out) {
 
     CV_Assert(_in.type() == CV_8UC1 || _in.type() == CV_8UC3);
 
-    if(_in.type() == CV_8UC3)
+    if (_in.type() == CV_8UC3) {
         cvtColor(_in, _out, COLOR_BGR2GRAY);
+    }
     else
         _in.copyTo(_out);
+}
+
+/**
+  * @brief Convert input image to gray if it is a 3-channels image
+  */
+static void _convertToGrayCUDA(cv::Mat* _in, cv::cuda::GpuMat* _out) {
+
+    CV_Assert(_in->type() == CV_8UC1 || _in->type() == CV_8UC3);
+
+    _out->upload(*_in);
+
+    if (_in->type() == CV_8UC3) {
+        cv::cuda::cvtColor(*_out, *_out, COLOR_BGR2GRAY);
+    }
+
 }
 
 
 /**
   * @brief Threshold input image using adaptive thresholding
   */
-static void _threshold(InputArray _in, OutputArray _out, int winSize, double constant) {
+static void _threshold(InputArray _in, OutputArray _out, int winSize, double constant, bool useCuda) {
 
     CV_Assert(winSize >= 3);
     if(winSize % 2 == 0) winSize++; // win size must be odd
-    adaptiveThreshold(_in, _out, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY_INV, winSize, constant);
+
+    if (useCuda) {
+        // download thresholded to the HOST space
+        cv::cuda::GpuMat outGpu;
+        cv::cuda::adaptiveThreshold(_in, outGpu, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY_INV, winSize, constant);
+        outGpu.download(_out);
+    }
+    else 
+        adaptiveThreshold(_in, _out, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY_INV, winSize, constant);
+
 }
 
 
@@ -350,7 +384,7 @@ static void _filterTooCloseCandidates(const vector< vector< Point2f > > &candida
 /**
  * @brief Initial steps on finding square candidates
  */
-static void _detectInitialCandidates(const Mat &grey, vector< vector< Point2f > > &candidates,
+static void _detectInitialCandidates(const InputArray& grey, vector< vector< Point2f > > &candidates,
                                      vector< vector< Point > > &contours,
                                      const Ptr<DetectorParameters> &params) {
 
@@ -372,9 +406,10 @@ static void _detectInitialCandidates(const Mat &grey, vector< vector< Point2f > 
 
         for (int i = begin; i < end; i++) {
             int currScale = params->adaptiveThreshWinSizeMin + i * params->adaptiveThreshWinSizeStep;
-            // threshold
+
+            // adaptive threshold
             Mat thresh;
-            _threshold(grey, thresh, currScale, params->adaptiveThreshConstant);
+            _threshold(grey, thresh, currScale, params->adaptiveThreshConstant, params->useCuda);
 
             // detect rectangles
             _findMarkerContours(thresh, candidatesArrays[i], contoursArrays[i],
@@ -403,14 +438,29 @@ static void _detectCandidates(InputArray _image, vector< vector< vector< Point2f
     Mat image = _image.getMat();
     CV_Assert(image.total() != 0);
 
-    /// 1. CONVERT TO GRAY
-    Mat grey;
-    _convertToGrey(image, grey);
-
     vector< vector< Point2f > > candidates;
     vector< vector< Point > > contours;
-    /// 2. DETECT FIRST SET OF CANDIDATES
-    _detectInitialCandidates(grey, candidates, contours, _params);
+
+    if (_params->useCuda) { // TODO: also check here if compiled with CUDA or whatever
+        
+        // here we use custom-defined implementations of _convertToGray
+        // and _detectInitialCandidates since we don't want to interfer
+        // with code depending on these functions other than the first 2-3
+        // image processing steps
+
+        /// 1. CONVERT TO GRAY (CUDA)
+        cv::cuda::GpuMat gray;
+        _convertToGrayCUDA(&image, &gray);
+        /// 2. DETECT FIRST SET OF CANDIDATES (semi-CUDA)
+        _detectInitialCandidates(gray, candidates, contours, _params);
+
+    } else {
+        /// 1. CONVERT TO GRAY
+        Mat grey;
+        _convertToGrey(image, grey);
+        /// 2. DETECT FIRST SET OF CANDIDATES
+        _detectInitialCandidates(grey, candidates, contours, _params);
+    }
 
     /// 3. SORT CORNERS
     _reorderCandidatesCorners(candidates);
@@ -533,7 +583,7 @@ static uint8_t _identifyOneCandidate(const Ptr<Dictionary>& dictionary, InputArr
     CV_Assert(_image.getMat().total() != 0);
     CV_Assert(params->markerBorderBits > 0);
 
-    uint8_t typ=1;
+    uint8_t typ = 1;
     // get bits
     Mat candidateBits =
         _extractBits(_image, _corners, dictionary->markerSize, params->markerBorderBits,

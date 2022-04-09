@@ -174,6 +174,10 @@ struct CV_EXPORTS_W DetectorParameters {
     CV_PROP_RW double minOtsuStdDev;
     CV_PROP_RW double errorCorrectionRate;
 
+    // True if CUDA image processing should be used
+    // if availiable on the current machine
+    CV_PROP_RW bool useCuda;
+
     // April :: User-configurable parameters.
     CV_PROP_RW float aprilTagQuadDecimate;
     CV_PROP_RW float aprilTagQuadSigma;
@@ -188,6 +192,7 @@ struct CV_EXPORTS_W DetectorParameters {
 
     // to detect white (inverted) markers
     CV_PROP_RW bool detectInvertedMarker;
+
 };
 
 

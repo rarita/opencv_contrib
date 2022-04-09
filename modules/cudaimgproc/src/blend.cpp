@@ -106,4 +106,69 @@ void cv::cuda::blendLinear(InputArray _img1, InputArray _img2, InputArray _weigh
     }
 }
 
+// todo move it out of blend.cpp
+// must figure out how to do that since it is complicated
+void cv::cuda::adaptiveThreshold(InputArray _src, OutputArray _dst, double maxValue,
+    int method, int type, int blockSize, double delta, Stream& stream) {
+
+    // only this method is supported
+    // box border - based method
+    CV_Assert(method == cv::AdaptiveThresholdTypes::ADAPTIVE_THRESH_MEAN_C);
+
+    // adaptiveThreshold checks
+    CV_Assert(_src.type() == CV_8UC1);
+    CV_Assert(blockSize % 2 == 1 && blockSize > 1);
+
+    // init vars
+    GpuMat src = _src.getGpuMat();
+
+    _dst.create(_src.size(), CV_8UC1);
+    GpuMat dst = _dst.getGpuMat();
+
+    /*
+    // -- create and apply a box filter
+    Ptr<Filter> boxFilter = createBoxFilter(_src.type(), _dst.type(), Size(blockSize, blockSize), Point(-1, -1), BORDER_REPLICATE | BORDER_ISOLATED);
+    boxFilter->apply(_src, _dst);
+    */
+
+
+    // setup arguments
+    const NppiSize nppSize = NppiSize{ src.size().width, src.size().height };
+    const NppiPoint offset = NppiPoint{ 0, 0 }; // idk todo check it
+    const NppiSize roi = NppiSize{ src.cols, src.rows };
+    const NppiSize maskSize = NppiSize{ blockSize, blockSize };
+
+    Npp8u le = 0;
+    Npp8u gt = static_cast<Npp8u> (maxValue);
+
+    switch (type)
+    {
+    case THRESH_BINARY:
+        break;
+    case THRESH_BINARY_INV:
+        // swap max and min values for pixels
+        std::swap(le, gt);
+        break;
+    default:
+        CV_Error(cv::Error::StsBadArg, "unsupported threshold type");
+        break;
+    }
+
+    // call NPP adaptive threshold
+    // cudaSafeCall does not work there, resolves to a wrong macro
+    checkNppError(
+        nppiFilterThresholdAdaptiveBoxBorder_8u_C1R(
+            src.ptr<Npp8u>(), static_cast<int> (src.step), nppSize, offset,
+            dst.ptr<Npp8u>(), static_cast<int> (dst.step), roi, maskSize,
+            static_cast<Npp32f> (delta), gt, le, NPP_BORDER_REPLICATE
+        ), __FILE__, __LINE__, "nppiFilterThresholdAdaptiveBoxBorder_8u_C1R"
+    );
+
+    // finalize
+    if (stream == 0) {
+        checkCudaError(cudaDeviceSynchronize(), __FILE__, __LINE__, "cudaDeviceSynchronize");
+    }
+
+}
+
 #endif
