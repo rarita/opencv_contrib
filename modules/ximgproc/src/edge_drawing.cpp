@@ -109,9 +109,11 @@ public:
     void getGradientImage(OutputArray dst) CV_OVERRIDE;
 
     vector<vector<Point> > getSegments() CV_OVERRIDE;
+    vector<int> getSegmentIndicesOfLines() const CV_OVERRIDE;
     void detectLines(OutputArray lines) CV_OVERRIDE;
     void detectEllipses(OutputArray ellipses) CV_OVERRIDE;
 
+    virtual String getDefaultName() const CV_OVERRIDE;
     virtual void read(const FileNode& fn) CV_OVERRIDE;
     virtual void write(FileStorage& fs) const CV_OVERRIDE;
 
@@ -120,6 +122,7 @@ protected:
     int height;       // height of source image
     uchar *srcImg;
     vector<vector<Point> > segmentPoints;
+    vector<int> segmentIndicesOfLines;
     Mat smoothImage;
     uchar *edgeImg;   // pointer to edge image data
     uchar *smoothImg; // pointer to smoothed image data
@@ -315,6 +318,11 @@ void EdgeDrawing::Params::write(cv::FileStorage& fs) const
     fs << "MaxErrorThreshold" << MaxErrorThreshold;
 }
 
+String EdgeDrawingImpl::getDefaultName() const
+{
+    return String("EdgeDrawing");
+}
+
 void EdgeDrawingImpl::read(const cv::FileNode& fn)
 {
     params.read(fn);
@@ -343,6 +351,7 @@ EdgeDrawingImpl::~EdgeDrawingImpl()
 
 void EdgeDrawingImpl::detectEdges(InputArray src)
 {
+    CV_Assert(!src.empty() && src.type() == CV_8UC1);
     gradThresh = params.GradientThresholdValue;
     anchorThresh = params.AnchorThresholdValue;
     op = params.EdgeDetectionOperator;
@@ -438,6 +447,11 @@ void EdgeDrawingImpl::getGradientImage(OutputArray _dst)
 std::vector<std::vector<Point> > EdgeDrawingImpl::getSegments()
 {
     return segmentPoints;
+}
+
+std::vector<int> EdgeDrawingImpl::getSegmentIndicesOfLines() const
+{
+    return segmentIndicesOfLines;
 }
 
 void EdgeDrawingImpl::ComputeGradient()
@@ -1287,6 +1301,7 @@ void EdgeDrawingImpl::detectLines(OutputArray _lines)
     double* x = new double[(width + height) * 8];
     double* y = new double[(width + height) * 8];
 
+    lines.clear();
     linesNo = 0;
 
     // Use the whole segment
@@ -1312,12 +1327,15 @@ void EdgeDrawingImpl::detectLines(OutputArray _lines)
     for (int i = 1; i <= size - linesNo; i++)
         lines.pop_back();
 
+    segmentIndicesOfLines.clear();
     for (int i = 0; i < linesNo; i++)
     {
         Vec4f line((float)lines[i].sx, (float)lines[i].sy, (float)lines[i].ex, (float)lines[i].ey);
         linePoints.push_back(line);
+        segmentIndicesOfLines.push_back(lines[i].segmentNo);
     }
     Mat(linePoints).copyTo(_lines);
+
     delete[] x;
     delete[] y;
 }
@@ -2420,6 +2438,7 @@ void EdgeDrawingImpl::detectEllipses(OutputArray ellipses)
     }
 
     min_line_len = 6;
+    line_error = params.LineFitErrorThreshold;
     Circles.clear();
     Ellipses.clear();
     lines.clear();
