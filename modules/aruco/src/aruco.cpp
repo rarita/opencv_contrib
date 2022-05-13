@@ -40,7 +40,12 @@ the use of this software, even if advised of the possibility of such damage.
 #include "opencv2/aruco.hpp"
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
+#ifdef OPENCV_CUDA
+#define COMPILE_WITH_CUDA
+#include "../../cudaimgproc/include/opencv2/cudaimgproc.hpp"
 #include <opencv2/cudev/common.hpp>
+#endif
+
 
 #include "apriltag_quad_thresh.hpp"
 #include "zarray.hpp"
@@ -54,9 +59,6 @@ the use of this software, even if advised of the possibility of such damage.
 #ifdef APRIL_DEBUG
 #include "opencv2/imgcodecs.hpp"
 #endif
-
-#define COMPILE_WITH_CUDA
-#include "../../cudaimgproc/include/opencv2/cudaimgproc.hpp"
 
 namespace cv {
 namespace aruco {
@@ -173,6 +175,7 @@ static void _convertToGrey(InputArray _in, OutputArray _out) {
         _in.copyTo(_out);
 }
 
+#ifdef OPENCV_CUDA
 /**
   * @brief Convert input image to gray if it is a 3-channels image
   */
@@ -187,6 +190,7 @@ static void _convertToGrayCUDA(cv::Mat* _in, cv::cuda::GpuMat* _out) {
     }
 
 }
+#endif
 
 
 /**
@@ -197,14 +201,14 @@ static void _threshold(InputArray _in, OutputArray _out, int winSize, double con
     CV_Assert(winSize >= 3);
     if(winSize % 2 == 0) winSize++; // win size must be odd
 
-    if (useCuda) {
+    #ifdef OPENCV_CUDA
         // download thresholded to the HOST space
         cv::cuda::GpuMat outGpu;
-        cv::cuda::adaptiveThreshold(_in, outGpu, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY_INV, winSize, constant);
+        //cv::cuda::adaptiveThreshold(_in, outGpu, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY_INV, winSize, constant);
         outGpu.download(_out);
-    }
-    else 
+    #else
         adaptiveThreshold(_in, _out, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY_INV, winSize, constant);
+    #endif
 
 }
 
@@ -497,16 +501,15 @@ static void _detectInitialCandidates(const InputArray& grey, vector< vector< Poi
  */
 static void _detectCandidates(InputArray _grayImage, vector< vector< vector< Point2f > > >& candidatesSetOut,
                               vector< vector< vector< Point > > >& contoursSetOut, const Ptr<DetectorParameters> &_params) {
+
     Mat grey = _grayImage.getMat();
     CV_DbgAssert(grey.total() != 0);
     CV_DbgAssert(grey.type() == CV_8UC1);
 
-    Mat image = _image.getMat();
-    CV_Assert(image.total() != 0);
-
     vector< vector< Point2f > > candidates;
     vector< vector< Point > > contours;
 
+    /*
     if (_params->useCuda) { // TODO: also check here if compiled with CUDA or whatever
         
         // here we use custom-defined implementations of _convertToGray
@@ -527,6 +530,8 @@ static void _detectCandidates(InputArray _grayImage, vector< vector< vector< Poi
         /// 2. DETECT FIRST SET OF CANDIDATES
         _detectInitialCandidates(grey, candidates, contours, _params);
     }
+    */
+    _detectInitialCandidates(grey, candidates, contours, _params);
 
     /// 3. SORT CORNERS
     _reorderCandidatesCorners(candidates);
@@ -535,6 +540,7 @@ static void _detectCandidates(InputArray _grayImage, vector< vector< vector< Poi
     // save the outter/inner border (i.e. potential candidates)
     _filterTooCloseCandidates(candidates, candidatesSetOut, contours, contoursSetOut,
                               _params->minMarkerDistanceRate, _params->detectInvertedMarker);
+
 }
 
 

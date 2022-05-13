@@ -211,14 +211,11 @@ struct CV_EXPORTS_W DetectorParameters {
     // to detect white (inverted) markers
     CV_PROP_RW bool detectInvertedMarker;
 
-<<<<<<< HEAD
-=======
     // New Aruco functionality proposed in the paper:
     // Romero-Ramirez et al: Speeded up detection of squared fiducial markers (2018)
     CV_PROP_RW bool useAruco3Detection;
     CV_PROP_RW int minSideLengthCanonicalImg;
     CV_PROP_RW float minMarkerLengthRatioOriginalImg;
->>>>>>> 3b5a55876fe0502418a9d9fb7d388c40f2a626b1
 };
 
 
